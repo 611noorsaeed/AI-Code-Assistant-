@@ -1,8 +1,7 @@
 import streamlit as st
 from langchain_client import LangChainClient
-from sandbox import run_code_snippet, detect_language
-from docx import Document
-import PyPDF2
+import tempfile, os
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 
 st.set_page_config(page_title="AI Code Assistant", layout="wide")
 
@@ -44,16 +43,27 @@ st.session_state.mode = mode
 LC = LangChainClient(mode=st.session_state.mode)
 st.caption(f"🟢 Assistant is running in **{mode}** mode")
 
-# --- File Content Extractor ---
+# --- File Content Extractor (with LangChain loaders) ---
 def extract_text(file):
-    if file.name.endswith(".docx"):
-        doc = Document(file)
-        return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-    elif file.name.endswith(".pdf"):
-        pdf = PyPDF2.PdfReader(file)
-        return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-    else:
-        return file.read().decode("utf-8", errors="ignore")
+    suffix = os.path.splitext(file.name)[-1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file.read())
+        tmp_path = tmp.name
+
+    try:
+        if suffix == ".docx":
+            loader = Docx2txtLoader(tmp_path)
+        elif suffix == ".pdf":
+            loader = PyPDFLoader(tmp_path)
+        else:
+            # plain text or code file
+            with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+
+        docs = loader.load()
+        return "\n".join([doc.page_content for doc in docs])
+    finally:
+        os.unlink(tmp_path)  # cleanup temp file
 
 # --- Save uploaded file text in session (no auto-analysis) ---
 if uploaded_files:
